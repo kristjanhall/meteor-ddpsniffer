@@ -2,6 +2,7 @@ Package.describe({
   name: 'kristjanhall:ddpsniffer',
   summary: 'Client side DDP sniffer with listener hooks and filters',
   version: '0.1.0',
+  git: 'https://github.com/kristjanhall/meteor-ddpsniffer'
 });
 
 Package.onUse(function(api) {
