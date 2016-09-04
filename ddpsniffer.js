@@ -6,7 +6,7 @@ DDPSniffer = class DDPSnifferClass {
     const self = this;
     this.name = name || 'DDPSniffer';
 
-    // placeholder for listner instances
+    // placeholder for listener instances
     this._listeners = {
       in: {},
       out: {},
@@ -19,17 +19,24 @@ DDPSniffer = class DDPSnifferClass {
     }
 
     // incoming traffic
-    // use the streamer to hook into all incomming messages, evaluate listener
+    // use the streamer to hook into all incomming messages and evaluate
     // filters to see if there are any callbacks that need to be called
     // ------------------------------------------------------------------------
     DDPPipe._stream.on('message', function(msg) {
-      let obj = EJSON.parse(msg);
+      const obj = EJSON.parse(msg);
 
-      for (let id in self._listeners.in) {
-        let listener = self._listeners.in[id];
+      for (const id in self._listeners.in) {
+        const listener = self._listeners.in[id];
+        const { evaluator } = listener;
         let pass = (listener.filters.length === 0);
 
-        pass = listener.filters.every(filter => {
+        // lets make sure that we have a valid array evaluator (i.e. "some"
+        // or "every")
+        if (!(evaluator in listener.filters)) {
+          throw new Error(`DDPSniffer: evaluator ${evaluator} is not valid`);
+        }
+
+        pass = listener.filters[evaluator](filter => {
           return (!filter) ? true : filter(obj);
         });
 
@@ -44,45 +51,66 @@ DDPSniffer = class DDPSnifferClass {
 
     // outgoing traffic
     // highjack the send interface to plug into all messages being sent from
-    // the client, evaluate listener filters to see if there are any
-    // callbacks that need to be called
+    // the client, evaluate filters to see if there are any callbacks that
+    // need to be called
     // ------------------------------------------------------------------------
-    let DDPNative = DDPPipe._send;
+    const DDPNative = DDPPipe._send;
     DDPPipe._send = function(obj) {
-      for (let id in self._listeners.out) {
-        let listener = self._listeners.out[id];
-        let pass = (listener.filters.length === 0);
+      const me = this;
 
-        pass = listener.filters.every(filter => {
-          return (!filter) ? true : filter(obj);
-        });
+      if (Object.keys(self._listeners.out).length > 0) {
+        for (const id in self._listeners.out) {
+          const listener = self._listeners.out[id];
+          const { evaluator } = listener;
+          let pass = (listener.filters.length === 0);
 
-        if (pass) {
-          listener.callback(Object.assign({
-            sniffer: self.name,
-            dir: 'out',
-          }, obj, self));
+          // TODO: have evaluator (every) optional ("any" for instance)
+          pass = listener.filters[evaluator](filter => {
+            return (!filter) ? true : filter(obj);
+          });
+
+          if (pass) {
+            const callher = listener.callback.bind({
+              // return the call to the native interface, possibly with an
+              // altered object
+              pass: function letPass(newObj) {
+                DDPNative.call(me, newObj || obj);
+              }
+            });
+
+            callher(Object.assign({
+              sniffer: self.name,
+              dir: 'out',
+
+            }, obj));
+          } else {
+            DDPNative.call(this, obj);
+          }
         }
+      }  else {
+        DDPNative.call(this, obj);
       }
-      // return the call to the native interface
-      DDPNative.call(this, obj);
     };
   }
 
-  addListener({ direction, filters }, callback) {
+  addListener({ direction, filters, evaluator = 'every' }, callback) {
     if (!callback) {
       throw new Error('DDPSniffer: missing a required callback function');
+    }
+    if (['every', 'some'].indexOf(evaluator) < 0) {
+      throw new Error('DDPSniffer: evaluator must be either "some" or "every"');
     }
 
     // make sure that filter[s] are an array of filter[s]
     let _filters = [].concat(filters);
 
-    // if no direction is specified then add this listner to both incoming
+    // if no direction is specified then add this listener to both incoming
     // and outgoing messages
     let _direction = (direction) ? [].concat(direction) : ['in', 'out'];
     _direction.forEach(dir => {
       this._listeners[dir][Random.id()] = {
         filters: _filters,
+        evaluator,
         callback
       };
     });

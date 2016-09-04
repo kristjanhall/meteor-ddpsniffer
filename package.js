@@ -9,7 +9,6 @@ Package.onUse(function(api) {
 
   const packages = [
     'ecmascript',
-    'kristjanhall:ddpmatcher',
   ];
 
   api.use(packages);
